@@ -1,0 +1,40 @@
+
+#INSTALL_PHP.YML#FILE
+
+---
+- hosts: local
+  become: yes  
+  roles: 
+    - install-apache
+    - install-php
+
+###INSTALL-APACHE#FOLDER###########################################################
+
+1)##TASKS#FOLDER
+
+#MAIN.YML#FILE
+
+- name: Install Apache server
+  yum: name=httpd state=latest
+  notify: Restart httpd
+  
+2)##HANDLER#FOLDER
+
+#MAIN.YML#FILE
+
+- name: Restart httpd
+  service: name=httpd enabled=yes state=restarted
+	
+###INSTALL-PHP#FOLDER################################################################
+
+##TASKS#FOLDER
+
+#MAIN.YML#FILE
+
+- name: Install Php
+  yum: name={{item}} state=latest
+  with_items:
+   - php
+   - php-gd
+   - php-pear   
+   

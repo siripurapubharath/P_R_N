@@ -1,0 +1,268 @@
+
+#BASIC#
+
+--- #
+- hosts: centos
+  remote_user: ansible
+  become: yes
+  become_method: sudo
+  tasks:
+  - name: Querying for Telnet Install
+    yum: pkg=telnet state=present update_cache=true
+	
+###############################################################################
+
+#STRUCTURE#	
+	
+	--- # Installing Httpd Server and Starting it
+-   hosts: centos
+    remote_user: ansible
+    become: yes
+    become_method: sudo
+    connection: ssh
+    gather_facts: yes
+    tasks:
+    - name: Install httpd server on centos
+      yum:
+        name: httpd
+        state: latest
+      notify:
+       - startservice
+    handlers:
+    - name: startservice
+      service:
+         name: httpd
+         state: restarted
+		 
+############################################################################
+		 
+#VAR SUBSTITUTION#		 
+		 
+	--- # Playbook with Variable Substitution
+-   hosts: '{{ myHosts }}'
+    remote_user: '{{ sudoUser }}'
+    become: '{{ becomeSudoUser }}'
+    become_method: sudo
+    connection: ssh
+    gather_facts: '{{ gather }}'
+    vars:
+        myHosts: centos
+        gather: yes
+        pkg: telnet  
+        sudoUser: ansible    
+        becomeSudoUser: yes        
+    tasks:
+    - name: Install telnet server on centos
+      yum:
+        name: '{{ pkg }}'
+        state: latest    
+		
+#####################################################################################
+
+#CONDITIONAL#
+
+--- # Conditional Based PlayBook
+-  hosts: centos
+   remote_user: ansible
+   become: yes
+   become_method: sudo
+   connection: ssh
+   gather_facts: yes
+   tasks: 
+   - name: If Os is RedHat install Http
+     yum:
+         name: httpd
+         state: present
+     when: ansible_os_family == 'RedHat'
+	 
+#############################################################################
+
+#LINE IN FILE#
+
+--- # Create File and Add the line to the File
+-  hosts: centos
+   tasks: 
+   - name: create a file if does not exist
+     file:
+         state: touch
+         path: /home/ansible/hostname.conf
+   - name: If line not there then add it
+     lineinfile:
+            state: present
+            dest: /home/ansible/hostname.conf
+            line: Hostname={{ ansible_hostname}}
+
+#############################################################################
+
+#DEBUG#
+
+--- # Debugging
+-   hosts: '{{ myHosts }}'
+    remote_user: ansible
+    become: yes
+    become_method: sudo
+    connection: ssh
+    gather_facts: '{{ gather }}'
+    vars:
+        myHosts: centos
+        gather: yes
+        pkg: telnet
+    tasks:
+    - name: Install telnet server on centos
+      yum:
+        name: '{{ pkg }}'
+        state: latest
+      register: result
+    - debug: var=result
+	
+#########################################################################
+
+#Debugging#
+
+--- # Debugging
+-   hosts: '{{ myHosts }}'
+    remote_user: ansible
+    become: yes
+    become_method: sudo
+    connection: ssh
+    gather_facts: '{{ gather }}'
+    vars:
+        myHosts: centos
+        gather: yes
+        pkg: telnet
+    tasks:
+    - shell: cat /etc/ansible/hosts
+      register: hello
+    - debug: msg="Hello File is empty"  
+      when: hello.stdout == ""
+	  
+######################################################################
+
+#APACHE#
+
+---# Install http server and Deploy the Html File
+-  hosts: centos
+   remote_user: ansible
+   become: yes
+   tasks: 
+      - name: Install Apache Server
+        yum:
+            name: httpd
+            state: present
+        notify:
+        - startservice
+      - name: create a file if does not exist
+        file:
+            state: touch
+            path: /var/www/html/index.html
+      - name: Adding line 
+        lineinfile:
+             state: present
+             path: /var/www/html/index.html
+             line: Hostname= {{ansible_hostname}}
+   handlers:
+    - name: startservice
+      service:
+         name: httpd
+         state: restarted
+		 
+#####################################################################
+
+#RUN SHELL SCRIPT#
+
+--- # Upload the Shell Script to Remote Host and Run it.
+-  hosts: centos
+   remote_user: ansible
+   become: yes
+   become_method: sudo
+   connection: ssh
+   gather_facts: yes    
+   tasks: 
+   -  name: Upload a file to the remote host if does not exist
+      copy:
+               src: /opt/hostname.sh
+               dest: /home/ansible/hostname.sh
+               mode: 0755
+   -  name: If line not there then add it
+      lineinfile:
+               state: present
+               dest: /home/ansible/hostname.sh
+               regexp: '^HOSTNAME='
+               line: HOSTNAME={{ ansible_hostname}}
+   -  name: Run the program
+      shell: /home/ansible/hostname.sh
+      register: result
+   -  debug: msg="stdout={{ result }}"
+   
+#########################################################################
+
+#HOSTNAME.Sh#
+
+#!/bin/sh
+
+HOSTNAME=
+
+echo "Host name is " $HOSTNAME       
+
+####################################################################
+
+#MULTIPLE SERVERS#
+
+--- # Multiple Tasks on Multiple Servers in Single Playbook
+- hosts: centos
+  remote_user: ansible
+  become: yes
+  become_method: sudo
+  connection: ssh
+  gather_facts: yes    
+  tasks:
+  - name: Install httpd on centos Servers
+    yum: pkg=lynx state=installed update_cache=true
+  - name: Querying for Telnet Install
+    yum: pkg=telnet state=present update_cache=true
+ 
+- hosts: local
+  remote_user: ansible
+  become: yes
+  become_method: sudo
+  connection: ssh
+  gather_facts: yes    
+  tasks:
+  - name: Install telnet on Local Server
+    yum: pkg=telnet state=installed update_cache=true
+  - name: Querying for Httpd Install
+    yum: pkg=httpd state=present update_cache=true
+	
+########################################################################
+
+#WITH_ITEMS#
+
+--- # Multiple Itmes
+-  hosts: centos
+   become: yes
+   tasks: 
+   - name: Multiple Items - {{ item }}
+     file:
+            state: touch
+            path: /home/ansible/{{ item }}
+     with_items:
+     - file_no_1
+     - file_no_2
+     - file_no_3
+   - name: "Install Common Libraries from CentOS mirror"
+     yum: state=present name={{ item }}
+     with_items:
+      - sudo
+      - vim
+      - gcc
+      - gcc-c++
+      - autoconf
+      - automake
+      - libxml2-devel
+      - unzip
+      - createrepo
+      - htop
+      - iotop
+      - wget
+      - tar
+	  

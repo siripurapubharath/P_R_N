@@ -1,0 +1,446 @@
+####################################################################
+
+#TOMCAT.YML#FILE#################################################################################
+
+---
+# This playbook deploys a simple Tomcat 7 server.
+
+- hosts: centos
+  remote_user: ansible
+  become: yes
+  become_method: sudo
+
+  roles:
+    - tomcat
+	
+###TOMCAT#FOLDER####################################################################################
+
+1)##TASKS#FOLDER#################################################################################
+
+#MAIN.YML##################################################################################
+
+---
+- name: Install Java 1.7
+  yum: name=java-1.7.0-openjdk state=present
+
+- name: add group "tomcat"
+  group: name=tomcat
+
+- name: add user "tomcat"
+  user: name=tomcat group=tomcat home=/usr/share/tomcat createhome=no
+  become: True
+  become_method: sudo
+
+- name: Download Tomcat
+  get_url: url=http://archive.apache.org/dist/tomcat/tomcat-7/v7.0.61/bin/apache-tomcat-7.0.61.tar.gz dest=/opt/apache-tomcat-7.0.61.tar.gz
+
+- name: Extract archive
+  command: chdir=/usr/share /bin/tar xvf /opt/apache-tomcat-7.0.61.tar.gz -C /opt/ creates=/opt/apache-tomcat-7.0.61
+
+- name: Symlink install directory
+  file: src=/opt/apache-tomcat-7.0.61 path=/usr/share/tomcat state=link
+
+- name: Change ownership of Tomcat installation
+  file: path=/usr/share/tomcat/ owner=tomcat group=tomcat state=directory recurse=yes
+
+- name: Configure Tomcat server
+  template: src=server.xml dest=/usr/share/tomcat/conf/
+  notify: restart tomcat
+
+- name: Configure Tomcat users
+  template: src=tomcat-users.xml dest=/usr/share/tomcat/conf/
+  notify: restart tomcat
+
+- name: Install Tomcat init script
+  copy: src=tomcat-initscript.sh dest=/etc/init.d/tomcat mode=0755
+
+- name: Start Tomcat
+  service: name=tomcat state=started enabled=yes
+
+- name: wait for tomcat to start
+  wait_for: port={{http_port}}
+  
+  
+2)##HANDLER#FOLDER#################################################################################
+ 
+#MAIN.YML#FILE#################################################################################
+ 
+ ---
+- name: restart tomcat
+  service: name=tomcat state=restarted
+
+- name: restart iptables
+  service: name=iptables state=restarted
+ 
+
+ 
+3)##FILES#FOLDER#################################################################################
+  
+#TOMCAT-INITSCRIPT.SH#FILE#################################################################################
+
+  
+  #!/bin/bash
+#
+# chkconfig: 345 99 28
+# description: Starts/Stops Apache Tomcat
+#
+# Tomcat 7 start/stop/status script
+# Forked from: https://gist.github.com/valotas/1000094
+# @author: Miglen Evlogiev <bash@miglen.com>
+#
+# Release updates:
+# Updated method for gathering pid of the current proccess
+# Added usage of CATALINA_BASE
+# Added coloring and additional status
+# Added check for existence of the tomcat user
+#
+ 
+#Location of JAVA_HOME (bin files)
+export JAVA_HOME=/usr/lib/jvm/jre
+ 
+#Add Java binary files to PATH
+export PATH=$JAVA_HOME/bin:$PATH
+ 
+#CATALINA_HOME is the location of the bin files of Tomcat  
+export CATALINA_HOME=/usr/share/tomcat  
+ 
+#CATALINA_BASE is the location of the configuration files of this instance of Tomcat
+export CATALINA_BASE=/usr/share/tomcat
+ 
+#TOMCAT_USER is the default user of tomcat
+export TOMCAT_USER=tomcat
+ 
+#TOMCAT_USAGE is the message if this script is called without any options
+TOMCAT_USAGE="Usage: $0 {\e[00;32mstart\e[00m|\e[00;31mstop\e[00m|\e[00;32mstatus\e[00m|\e[00;31mrestart\e[00m}"
+ 
+#SHUTDOWN_WAIT is wait time in seconds for java proccess to stop
+SHUTDOWN_WAIT=20
+ 
+tomcat_pid() {
+        echo `ps -fe | grep $CATALINA_BASE | grep -v grep | tr -s " "|cut -d" " -f2`
+}
+ 
+start() {
+  pid=$(tomcat_pid)
+  if [ -n "$pid" ]
+  then
+    echo -e "\e[00;31mTomcat is already running (pid: $pid)\e[00m"
+  else
+    # Start tomcat
+    echo -e "\e[00;32mStarting tomcat\e[00m"
+    #ulimit -n 100000
+    #umask 007
+    #/bin/su -p -s /bin/sh tomcat
+        if [ `user_exists $TOMCAT_USER` = "1" ]
+        then
+                su $TOMCAT_USER -c $CATALINA_HOME/bin/startup.sh
+        else
+                sh $CATALINA_HOME/bin/startup.sh
+        fi
+        status
+  fi
+  return 0
+}
+ 
+status(){
+          pid=$(tomcat_pid)
+          if [ -n "$pid" ]; then echo -e "\e[00;32mTomcat is running with pid: $pid\e[00m"
+          else echo -e "\e[00;31mTomcat is not running\e[00m"
+          fi
+}
+ 
+stop() {
+  pid=$(tomcat_pid)
+  if [ -n "$pid" ]
+  then
+    echo -e "\e[00;31mStoping Tomcat\e[00m"
+    #/bin/su -p -s /bin/sh tomcat
+        sh $CATALINA_HOME/bin/shutdown.sh
+ 
+    let kwait=$SHUTDOWN_WAIT
+    count=0;
+    until [ `ps -p $pid | grep -c $pid` = '0' ] || [ $count -gt $kwait ]
+    do
+      echo -n -e "\n\e[00;31mwaiting for processes to exit\e[00m";
+      sleep 1
+      let count=$count+1;
+    done
+ 
+    if [ $count -gt $kwait ]; then
+      echo -n -e "\n\e[00;31mkilling processes which didn't stop after $SHUTDOWN_WAIT seconds\e[00m"
+      kill -9 $pid
+    fi
+  else
+    echo -e "\e[00;31mTomcat is not running\e[00m"
+  fi
+ 
+  return 0
+}
+ 
+user_exists(){
+        if id -u $1 >/dev/null 2>&1; then
+        echo "1"
+        else
+                echo "0"
+        fi
+}
+ 
+case $1 in
+ 
+        start)
+          start
+        ;;
+       
+        stop)  
+          stop
+        ;;
+       
+        restart)
+          stop
+          start
+        ;;
+       
+        status)
+                status
+               
+        ;;
+       
+        *)
+                echo -e $TOMCAT_USAGE
+        ;;
+esac    
+exit 0
+
+
+
+4)##TEMPLATES#FOLDER#################################################################################
+
+#1)#iptables-save#FILE#################################################################################
+
+
+# {{ ansible_managed }}
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [4:512]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -p icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+-A INPUT -p tcp -m state --state NEW -m tcp --dport {{ http_port }} -j ACCEPT
+-A INPUT -p tcp -m state --state NEW -m tcp --dport {{ https_port }} -j ACCEPT
+-A INPUT -j REJECT --reject-with icmp-host-prohibited
+-A FORWARD -j REJECT --reject-with icmp-host-prohibited
+COMMIT
+
+ 
+#2)#SERVER.XML#FILE#################################################################################
+
+<?xml version='1.0' encoding='utf-8'?>
+
+<!-- {{ ansible_managed }} -->
+
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<!-- Note:  A "Server" is not itself a "Container", so you may not
+     define subcomponents such as "Valves" at this level.
+     Documentation at /docs/config/server.html
+ -->
+<Server port="8005" shutdown="SHUTDOWN">
+  <!-- Security listener. Documentation at /docs/config/listeners.html
+  <Listener className="org.apache.catalina.security.SecurityListener" />
+  -->
+  <!--APR library loader. Documentation at /docs/apr.html -->
+  <Listener className="org.apache.catalina.core.AprLifecycleListener" SSLEngine="on" />
+  <!--Initialize Jasper prior to webapps are loaded. Documentation at /docs/jasper-howto.html -->
+  <Listener className="org.apache.catalina.core.JasperListener" />
+  <!-- Prevent memory leaks due to use of particular java/javax APIs-->
+  <Listener className="org.apache.catalina.core.JreMemoryLeakPreventionListener" />
+  <Listener className="org.apache.catalina.mbeans.GlobalResourcesLifecycleListener" />
+  <Listener className="org.apache.catalina.core.ThreadLocalLeakPreventionListener" />
+
+  <!-- Global JNDI resources
+       Documentation at /docs/jndi-resources-howto.html
+  -->
+  <GlobalNamingResources>
+    <!-- Editable user database that can also be used by
+         UserDatabaseRealm to authenticate users
+    -->
+    <Resource name="UserDatabase" auth="Container"
+              type="org.apache.catalina.UserDatabase"
+              description="User database that can be updated and saved"
+              factory="org.apache.catalina.users.MemoryUserDatabaseFactory"
+              pathname="conf/tomcat-users.xml" />
+  </GlobalNamingResources>
+
+  <!-- A "Service" is a collection of one or more "Connectors" that share
+       a single "Container" Note:  A "Service" is not itself a "Container",
+       so you may not define subcomponents such as "Valves" at this level.
+       Documentation at /docs/config/service.html
+   -->
+  <Service name="Catalina">
+
+    <!--The connectors can use a shared executor, you can define one or more named thread pools-->
+    <!--
+    <Executor name="tomcatThreadPool" namePrefix="catalina-exec-"
+        maxThreads="150" minSpareThreads="4"/>
+    -->
+
+
+    <!-- A "Connector" represents an endpoint by which requests are received
+         and responses are returned. Documentation at :
+         Java HTTP Connector: /docs/config/http.html (blocking & non-blocking)
+         Java AJP  Connector: /docs/config/ajp.html
+         APR (HTTP/AJP) Connector: /docs/apr.html
+         Define a non-SSL HTTP/1.1 Connector on port 8080
+    -->
+    <Connector port="{{ http_port }}" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+    <!-- A "Connector" using the shared thread pool-->
+    <!--
+    <Connector executor="tomcatThreadPool"
+               port="8080" protocol="HTTP/1.1"
+               connectionTimeout="20000"
+               redirectPort="8443" />
+    -->
+    <!-- Define a SSL HTTP/1.1 Connector on port 8443
+         This connector uses the JSSE configuration, when using APR, the
+         connector should be using the OpenSSL style configuration
+         described in the APR documentation -->
+    <!--
+    <Connector port="{{ https_port }}" protocol="HTTP/1.1" SSLEnabled="true"
+               maxThreads="150" scheme="https" secure="true"
+               clientAuth="false" sslProtocol="TLS" />
+    -->
+
+    <!-- Define an AJP 1.3 Connector on port 8009 -->
+    <Connector port="8009" protocol="AJP/1.3" redirectPort="8443" />
+
+
+    <!-- An Engine represents the entry point (within Catalina) that processes
+         every request.  The Engine implementation for Tomcat stand alone
+         analyzes the HTTP headers included with the request, and passes them
+         on to the appropriate Host (virtual host).
+         Documentation at /docs/config/engine.html -->
+
+    <!-- You should set jvmRoute to support load-balancing via AJP ie :
+    <Engine name="Catalina" defaultHost="localhost" jvmRoute="jvm1">
+    -->
+    <Engine name="Catalina" defaultHost="localhost">
+
+      <!--For clustering, please take a look at documentation at:
+          /docs/cluster-howto.html  (simple how to)
+          /docs/config/cluster.html (reference documentation) -->
+      <!--
+      <Cluster className="org.apache.catalina.ha.tcp.SimpleTcpCluster"/>
+      -->
+
+      <!-- Use the LockOutRealm to prevent attempts to guess user passwords
+           via a brute-force attack -->
+      <Realm className="org.apache.catalina.realm.LockOutRealm">
+        <!-- This Realm uses the UserDatabase configured in the global JNDI
+             resources under the key "UserDatabase".  Any edits
+             that are performed against this UserDatabase are immediately
+             available for use by the Realm.  -->
+        <Realm className="org.apache.catalina.realm.UserDatabaseRealm"
+               resourceName="UserDatabase"/>
+      </Realm>
+
+      <Host name="localhost"  appBase="webapps"
+            unpackWARs="true" autoDeploy="true">
+
+        <!-- SingleSignOn valve, share authentication between web applications
+             Documentation at: /docs/config/valve.html -->
+        <!--
+        <Valve className="org.apache.catalina.authenticator.SingleSignOn" />
+        -->
+
+        <!-- Access log processes all example.
+             Documentation at: /docs/config/valve.html
+             Note: The pattern used is equivalent to using pattern="common" -->
+        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs"
+               prefix="localhost_access_log." suffix=".txt"
+               pattern="%h %l %u %t &quot;%r&quot; %s %b" />
+
+      </Host>
+    </Engine>
+  </Service>
+</Server>
+
+
+
+#3)#TOMCAT-USER.XML#FILE#################################################################################
+
+
+<?xml version='1.0' encoding='utf-8'?>
+
+<!-- {{ ansible_managed }} -->
+
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<tomcat-users>
+<!--
+  NOTE:  By default, no user is included in the "manager-gui" role required
+  to operate the "/manager/html" web application.  If you wish to use this app,
+  you must define such a user - the username and password are arbitrary.
+-->
+<!--
+  NOTE:  The sample user and role entries below are wrapped in a comment
+  and thus are ignored when reading this file. Do not forget to remove
+  <!.. ..> that surrounds them.
+-->
+
+  <user username="{{ admin_username }}" password="{{ admin_password }}" roles="manager-gui" />
+
+<!--
+  <role rolename="tomcat"/>
+  <role rolename="role1"/>
+  <user username="tomcat" password="tomcat" roles="tomcat"/>
+  <user username="both" password="tomcat" roles="tomcat,role1"/>
+  <user username="role1" password="tomcat" roles="role1"/>
+-->
+
+</tomcat-users>
+
+
+
+5)##VARS#FOLDER#################################################################################
+
+####MAIN.YML#FILE#################################################################################
+
+# Here are variables related to the Tomcat installation
+
+http_port: 8080
+https_port: 8443
+
+# This will configure a default manager-gui user:
+
+admin_username: admin
+admin_password: adminsecret
+
+
